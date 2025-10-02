@@ -44,26 +44,32 @@ resource "oci_core_security_list" "dokploy_security_list" {
   vcn_id         = oci_core_vcn.dokploy_vcn.id
   display_name   = "Dokploy Security List"
 
-  # Ingress Rules for Dokploy
-  ingress_security_rules {
-    protocol = "6" # TCP
-    source   = "0.0.0.0/0"
-    tcp_options {
-      min = 3000
-      max = 3000
+  # SSH - restricted to whitelisted IPs
+  dynamic "ingress_security_rules" {
+    for_each = var.admin_ip_whitelist
+    content {
+      protocol = "6" # TCP
+      source   = ingress_security_rules.value
+      tcp_options {
+        min = 22
+        max = 22
+      }
+      description = "Allow SSH from whitelisted IP: ${ingress_security_rules.value}"
     }
-    description = "Allow HTTP traffic for Dokploy on port 3000"
   }
 
-  # SSH
-  ingress_security_rules {
-    protocol = "6" # TCP
-    source   = "0.0.0.0/0"
-    tcp_options {
-      min = 22
-      max = 22
+  # Dokploy Dashboard - restricted to whitelisted IPs
+  dynamic "ingress_security_rules" {
+    for_each = var.admin_ip_whitelist
+    content {
+      protocol = "6" # TCP
+      source   = ingress_security_rules.value
+      tcp_options {
+        min = 3000
+        max = 3000
+      }
+      description = "Allow Dokploy dashboard from whitelisted IP: ${ingress_security_rules.value}"
     }
-    description = "Allow SSH traffic on port 22"
   }
 
   # HTTP & HTTPS traffic

@@ -46,3 +46,9 @@ variable "ocpus" {
   type        = string
   default     = "1" # OCI Free
 }
+
+variable "admin_ip_whitelist" {
+  description = "List of IP addresses (in CIDR notation) allowed to access SSH and Dokploy dashboard. Example: ['1.2.3.4/32', '5.6.7.8/32']"
+  type        = list(string)
+  default     = ["0.0.0.0/0"] # Open to all by default - CHANGE THIS for production
+}
