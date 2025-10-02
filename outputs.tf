@@ -1,6 +1,6 @@
 output "main_instance_public_ip" {
-  description = "Public IP of the main Dokploy instance"
-  value       = oci_core_instance.dokploy_main.public_ip
+  description = "Reserved Public IP of the main Dokploy instance"
+  value       = oci_core_public_ip.dokploy_main_reserved_ip.ip_address
 }
 
 output "main_instance_id" {
@@ -20,5 +20,5 @@ output "worker_instance_ids" {
 
 output "dokploy_dashboard_url" {
   description = "URL to access the Dokploy dashboard"
-  value       = "http://${oci_core_instance.dokploy_main.public_ip}:3000"
+  value       = "http://${oci_core_public_ip.dokploy_main_reserved_ip.ip_address}:3000"
 }
