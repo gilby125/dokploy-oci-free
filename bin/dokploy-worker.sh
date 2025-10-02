@@ -1,4 +1,13 @@
 #!/bin/bash
+set -euo pipefail
+trap 'echo "Error on line $LINENO"' ERR
+
+# Setup logging
+LOG_FILE="/var/log/dokploy-worker-install.log"
+exec 1> >(tee -a "$LOG_FILE")
+exec 2>&1
+
+echo "=== Starting Dokploy worker configuration at $(date) ==="
 
 # Wait for cloud-init's apt-daily services to complete using systemd
 echo "Waiting for apt-daily services to complete..."
@@ -15,36 +24,91 @@ sleep 10
 
 # Wait for all apt locks to be released
 echo "Waiting for apt locks to be fully released..."
+LOCK_RELEASED=false
 for i in {1..60}; do
     if ! fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock >/dev/null 2>&1; then
         echo "Apt locks released after $i attempts"
+        LOCK_RELEASED=true
         break
     fi
     echo "Attempt $i: Apt still locked, waiting..."
     sleep 2
 done
 
+if [ "$LOCK_RELEASED" = false ]; then
+    echo "ERROR: Failed to acquire apt locks after 60 attempts"
+    exit 1
+fi
+
 echo "System ready. Starting configuration..."
 
+# Update package lists
+apt update || {
+    echo "ERROR: Failed to update package lists"
+    exit 1
+}
+
 # Add ubuntu SSH authorized keys to the root user
+if [ ! -f /home/ubuntu/.ssh/authorized_keys ]; then
+    echo "ERROR: /home/ubuntu/.ssh/authorized_keys not found"
+    exit 1
+fi
+
 mkdir -p /root/.ssh
-cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
+cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/ || {
+    echo "ERROR: Failed to copy authorized_keys"
+    exit 1
+}
 chown root:root /root/.ssh/authorized_keys
 chmod 600 /root/.ssh/authorized_keys
 
-# Add ubuntu user to sudoers
-echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+# Add ubuntu user to sudoers using sudoers.d
+echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-cloud-init-users
+chmod 440 /etc/sudoers.d/90-cloud-init-users
+visudo -c -f /etc/sudoers.d/90-cloud-init-users || {
+    echo "ERROR: Invalid sudoers configuration"
+    rm /etc/sudoers.d/90-cloud-init-users
+    exit 1
+}
 
-# OpenSSH
-apt install -y openssh-server
-systemctl status sshd
+# Install OpenSSH
+apt install -y openssh-server || {
+    echo "ERROR: Failed to install openssh-server"
+    exit 1
+}
 
-# Permit root login
-sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
-systemctl restart sshd
+# Configure SSH - only allow key-based authentication, disable password auth
+sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+
+systemctl restart sshd || {
+    echo "ERROR: Failed to restart sshd"
+    exit 1
+}
+
+# Verify SSH is running
+if ! systemctl is-active --quiet sshd; then
+    echo "ERROR: SSH service is not running"
+    exit 1
+fi
 
 # Install Docker
-curl -sSL https://get.docker.com | sh
+if ! curl -sSL https://get.docker.com | sh; then
+    echo "ERROR: Docker installation failed"
+    exit 1
+fi
+
+# Add ubuntu user to docker group
+usermod -aG docker ubuntu || echo "WARNING: Failed to add ubuntu to docker group"
+
+# Verify Docker is running
+if ! systemctl is-active --quiet docker; then
+    echo "ERROR: Docker service is not running"
+    exit 1
+fi
+
+echo "Docker version: $(docker --version)"
 
 # Allow Docker Swarm traffic
 ufw allow 80,443,3000,996,7946,4789,2377/tcp
@@ -62,3 +126,28 @@ iptables -D FORWARD -j REJECT --reject-with icmp-host-prohibited || true
 iptables -A FORWARD -j REJECT --reject-with icmp-host-prohibited
 
 netfilter-persistent save
+
+# Final validation
+echo "=== Configuration Validation ==="
+
+if systemctl is-active --quiet docker; then
+    echo "✓ Docker is running"
+else
+    echo "✗ Docker is not running"
+    exit 1
+fi
+
+if systemctl is-active --quiet sshd; then
+    echo "✓ SSH service is running"
+else
+    echo "✗ SSH service is not running"
+    exit 1
+fi
+
+if iptables -L INPUT -n | grep -q "2377"; then
+    echo "✓ Docker Swarm firewall rules are configured"
+else
+    echo "✗ Docker Swarm firewall rules may be missing"
+fi
+
+echo "=== Dokploy worker configuration completed successfully at $(date) ==="
