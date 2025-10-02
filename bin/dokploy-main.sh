@@ -1,5 +1,31 @@
 #!/bin/bash
 
+# Wait for cloud-init's apt-daily services to complete using systemd
+echo "Waiting for apt-daily services to complete..."
+systemd-run --property="After=apt-daily.service apt-daily-upgrade.service" --wait /bin/true
+
+# Disable apt-daily services permanently to prevent race conditions
+systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+systemctl disable apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+systemctl mask apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
+
+# Kill any remaining apt processes and wait for locks
+killall -9 apt apt-get 2>/dev/null || true
+sleep 10
+
+# Wait for all apt locks to be released
+echo "Waiting for apt locks to be fully released..."
+for i in {1..60}; do
+    if ! fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock >/dev/null 2>&1; then
+        echo "Apt locks released after $i attempts"
+        break
+    fi
+    echo "Attempt $i: Apt still locked, waiting..."
+    sleep 2
+done
+
+echo "System ready. Starting configuration..."
+
 # Add ubuntu SSH authorized keys to the root user
 mkdir -p /root/.ssh
 cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/
@@ -17,7 +43,10 @@ systemctl status sshd
 sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
 systemctl restart sshd
 
-# Install Dokploy
+# Install Docker first before Dokploy to avoid apt race condition
+curl -sSL https://get.docker.com | sh
+
+# Install Dokploy (will detect Docker is already installed)
 curl -sSL https://dokploy.com/install.sh | sh
 
 # Allow Docker Swarm traffic
