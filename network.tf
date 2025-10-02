@@ -44,9 +44,9 @@ resource "oci_core_security_list" "dokploy_security_list" {
   vcn_id         = oci_core_vcn.dokploy_vcn.id
   display_name   = "Dokploy Security List"
 
-  # SSH - restricted to whitelisted IPs
+  # SSH - restricted to whitelisted IPs and internal VCN
   dynamic "ingress_security_rules" {
-    for_each = var.admin_ip_whitelist
+    for_each = concat(var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
     content {
       protocol = "6" # TCP
       source   = ingress_security_rules.value
@@ -58,9 +58,9 @@ resource "oci_core_security_list" "dokploy_security_list" {
     }
   }
 
-  # Dokploy Dashboard - restricted to whitelisted IPs
+  # Dokploy Dashboard - restricted to whitelisted IPs and internal VCN
   dynamic "ingress_security_rules" {
-    for_each = var.admin_ip_whitelist
+    for_each = concat(var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
     content {
       protocol = "6" # TCP
       source   = ingress_security_rules.value
