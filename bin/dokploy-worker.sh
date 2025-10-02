@@ -110,10 +110,11 @@ fi
 
 echo "Docker version: $(docker --version)"
 
-# Allow Docker Swarm traffic
-ufw allow 80,443,3000,996,7946,4789,2377/tcp
-ufw allow 7946,4789,2377/udp
+# Configure firewall rules for Docker Swarm
+# Note: Using iptables directly since OCI instances use iptables by default
+# ufw may not be installed or enabled
 
+iptables -I INPUT 1 -p tcp --dport 22 -j ACCEPT
 iptables -I INPUT 1 -p tcp --dport 2377 -j ACCEPT
 iptables -I INPUT 1 -p udp --dport 7946 -j ACCEPT
 iptables -I INPUT 1 -p tcp --dport 7946 -j ACCEPT
