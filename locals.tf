@@ -16,7 +16,7 @@ locals {
       recovery_action = "RESTORE_INSTANCE"
     }
     instance_options = {
-      are_legacy_imds_endpoints_disabled = false
+      are_legacy_imds_endpoints_disabled = true
     }
   }
 }

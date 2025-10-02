@@ -21,6 +21,34 @@ readonly DOCKER_INSTALL_SCRIPT="/tmp/docker-install-$$.sh"
 readonly MAX_RETRIES=3
 readonly RETRY_DELAY=5
 
+# Known good checksums (update these when upgrading)
+# To get current checksums: curl -sSL https://get.docker.com | sha256sum
+readonly DOCKER_SCRIPT_SHA256="SKIP"  # Set to specific hash or SKIP to bypass verification
+
+# Function to verify checksum
+verify_checksum() {
+    local file="$1"
+    local expected_hash="$2"
+
+    if [[ "$expected_hash" == "SKIP" ]]; then
+        echo "WARNING: Checksum verification skipped. This is not recommended for production."
+        return 0
+    fi
+
+    local actual_hash
+    actual_hash=$(sha256sum "$file" | awk '{print $1}')
+
+    if [[ "$actual_hash" != "$expected_hash" ]]; then
+        echo "ERROR: Checksum verification failed!"
+        echo "Expected: $expected_hash"
+        echo "Got:      $actual_hash"
+        return 1
+    fi
+
+    echo "Checksum verified successfully"
+    return 0
+}
+
 # Function to download with retry
 download_with_retry() {
     local url="$1"
@@ -104,28 +132,8 @@ apt update || {
     exit 1
 }
 
-# Add ubuntu SSH authorized keys to the root user
-if [ ! -f /home/ubuntu/.ssh/authorized_keys ]; then
-    echo "ERROR: /home/ubuntu/.ssh/authorized_keys not found"
-    exit 1
-fi
-
-mkdir -p /root/.ssh
-chmod 700 /root/.ssh
-chown root:root /root/.ssh
-
-cp /home/ubuntu/.ssh/authorized_keys /root/.ssh/ || {
-    echo "ERROR: Failed to copy authorized_keys"
-    exit 1
-}
-chown root:root /root/.ssh/authorized_keys
-chmod 600 /root/.ssh/authorized_keys
-
-# Verify permissions
-if [[ $(stat -c %a /root/.ssh) != "700" ]]; then
-    echo "ERROR: Failed to set correct permissions on /root/.ssh"
-    exit 1
-fi
+# NOTE: Root SSH access is disabled via SSH hardening configuration
+# Ubuntu user has sudo access for administrative tasks
 
 # Add ubuntu user to sudoers using sudoers.d
 echo "ubuntu ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/90-cloud-init-users
@@ -147,7 +155,7 @@ cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup
 
 # Configure SSH - only allow key-based authentication, disable password auth
 cat > /etc/ssh/sshd_config.d/99-hardening.conf << 'EOF'
-PermitRootLogin prohibit-password
+PermitRootLogin no
 PasswordAuthentication no
 PubkeyAuthentication yes
 ChallengeResponseAuthentication no
@@ -190,6 +198,13 @@ fi
 
 # Make script readable for inspection
 chmod 644 "$DOCKER_INSTALL_SCRIPT"
+
+# Verify checksum
+if ! verify_checksum "$DOCKER_INSTALL_SCRIPT" "$DOCKER_SCRIPT_SHA256"; then
+    echo "ERROR: Docker script checksum verification failed"
+    rm -f "$DOCKER_INSTALL_SCRIPT"
+    exit 1
+fi
 
 # Log script header for audit
 echo "Docker script header (first 10 lines):"
