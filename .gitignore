@@ -10,3 +10,7 @@
 .ssh
 **/node_modules/
 .terraform.lock.hcl
+
+# Terraform variables with secrets
+terraform.tfvars
+*.auto.tfvars
