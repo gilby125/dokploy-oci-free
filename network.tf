@@ -97,26 +97,32 @@ resource "oci_core_security_list" "dokploy_security_list" {
     description = "Allow DNS-over-TLS (DoT) traffic on port 853"
   }
 
-  # HTTP & HTTPS traffic - open to internet for public website
-  # Protected services use Traefik IP whitelist middleware
-  ingress_security_rules {
-    protocol = "6" # TCP
-    source   = "0.0.0.0/0"
-    tcp_options {
-      min = 80
-      max = 80
+  # HTTP & HTTPS traffic - restricted to current IP, whitelisted IPs, and internal VCN
+  # Access everything via Tailscale or whitelisted IPs
+  dynamic "ingress_security_rules" {
+    for_each = concat([local.current_ip_cidr], var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
+    content {
+      protocol = "6" # TCP
+      source   = ingress_security_rules.value
+      tcp_options {
+        min = 80
+        max = 80
+      }
+      description = "Allow HTTP from whitelisted IP: ${ingress_security_rules.value}"
     }
-    description = "Allow HTTP traffic on port 80"
   }
 
-  ingress_security_rules {
-    protocol = "6" # TCP
-    source   = "0.0.0.0/0"
-    tcp_options {
-      min = 443
-      max = 443
+  dynamic "ingress_security_rules" {
+    for_each = concat([local.current_ip_cidr], var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
+    content {
+      protocol = "6" # TCP
+      source   = ingress_security_rules.value
+      tcp_options {
+        min = 443
+        max = 443
+      }
+      description = "Allow HTTPS from whitelisted IP: ${ingress_security_rules.value}"
     }
-    description = "Allow HTTPS traffic on port 443"
   }
 
   # ICMP traffic
