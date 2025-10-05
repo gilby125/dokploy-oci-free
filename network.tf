@@ -44,9 +44,9 @@ resource "oci_core_security_list" "dokploy_security_list" {
   vcn_id         = oci_core_vcn.dokploy_vcn.id
   display_name   = "Dokploy Security List"
 
-  # SSH - restricted to whitelisted IPs and internal VCN
+  # SSH - restricted to current IP, whitelisted IPs, and internal VCN
   dynamic "ingress_security_rules" {
-    for_each = concat(var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
+    for_each = concat([local.current_ip_cidr], var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
     content {
       protocol = "6" # TCP
       source   = ingress_security_rules.value
@@ -58,9 +58,9 @@ resource "oci_core_security_list" "dokploy_security_list" {
     }
   }
 
-  # Dokploy Dashboard - restricted to whitelisted IPs and internal VCN
+  # Dokploy Dashboard - restricted to current IP, whitelisted IPs, and internal VCN
   dynamic "ingress_security_rules" {
-    for_each = concat(var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
+    for_each = concat([local.current_ip_cidr], var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
     content {
       protocol = "6" # TCP
       source   = ingress_security_rules.value
@@ -72,25 +72,56 @@ resource "oci_core_security_list" "dokploy_security_list" {
     }
   }
 
-  # HTTP & HTTPS traffic
-  ingress_security_rules {
-    protocol = "6" # TCP
-    source   = "0.0.0.0/0"
-    tcp_options {
-      min = 80
-      max = 80
+  # AdGuard Home Web UI - restricted to current IP, whitelisted IPs, and internal VCN
+  dynamic "ingress_security_rules" {
+    for_each = concat([local.current_ip_cidr], var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
+    content {
+      protocol = "6" # TCP
+      source   = ingress_security_rules.value
+      tcp_options {
+        min = 3053
+        max = 3053
+      }
+      description = "Allow AdGuard Home web UI from whitelisted IP: ${ingress_security_rules.value}"
     }
-    description = "Allow HTTP traffic on port 80"
   }
 
+  # DNS-over-TLS (AdGuard Home)
   ingress_security_rules {
     protocol = "6" # TCP
     source   = "0.0.0.0/0"
     tcp_options {
-      min = 443
-      max = 443
+      min = 853
+      max = 853
     }
-    description = "Allow HTTPS traffic on port 443"
+    description = "Allow DNS-over-TLS (DoT) traffic on port 853"
+  }
+
+  # HTTP & HTTPS traffic - restricted to current IP, whitelisted IPs, and internal VCN
+  dynamic "ingress_security_rules" {
+    for_each = concat([local.current_ip_cidr], var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
+    content {
+      protocol = "6" # TCP
+      source   = ingress_security_rules.value
+      tcp_options {
+        min = 80
+        max = 80
+      }
+      description = "Allow HTTP from whitelisted IP: ${ingress_security_rules.value}"
+    }
+  }
+
+  dynamic "ingress_security_rules" {
+    for_each = concat([local.current_ip_cidr], var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
+    content {
+      protocol = "6" # TCP
+      source   = ingress_security_rules.value
+      tcp_options {
+        min = 443
+        max = 443
+      }
+      description = "Allow HTTPS from whitelisted IP: ${ingress_security_rules.value}"
+    }
   }
 
   # ICMP traffic
