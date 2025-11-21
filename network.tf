@@ -58,18 +58,15 @@ resource "oci_core_security_list" "dokploy_security_list" {
     }
   }
 
-  # Dokploy Dashboard - restricted to current IP, whitelisted IPs, and internal VCN
-  dynamic "ingress_security_rules" {
-    for_each = concat([local.current_ip_cidr], var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
-    content {
-      protocol = "6" # TCP
-      source   = ingress_security_rules.value
-      tcp_options {
-        min = 3000
-        max = 3000
-      }
-      description = "Allow Dokploy dashboard from whitelisted IP: ${ingress_security_rules.value}"
+  # Dokploy Dashboard - only reachable from inside the VCN; external access must use Traefik HTTPS
+  ingress_security_rules {
+    protocol = "6" # TCP
+    source   = oci_core_vcn.dokploy_vcn.cidr_block
+    tcp_options {
+      min = 3000
+      max = 3000
     }
+    description = "Allow Dokploy dashboard from within the VCN"
   }
 
   # AdGuard Home Web UI - restricted to current IP, whitelisted IPs, and internal VCN
@@ -117,6 +114,47 @@ resource "oci_core_security_list" "dokploy_security_list" {
       max = 443
     }
     description = "Allow HTTPS from internet (Traefik handles service-level restrictions)"
+  }
+
+  # Docker Swarm manager coordination traffic (internal only)
+  ingress_security_rules {
+    protocol = "6" # TCP
+    source   = oci_core_vcn.dokploy_vcn.cidr_block
+    tcp_options {
+      min = 2377
+      max = 2377
+    }
+    description = "Allow Docker Swarm manager traffic within VCN"
+  }
+
+  ingress_security_rules {
+    protocol = "6" # TCP
+    source   = oci_core_vcn.dokploy_vcn.cidr_block
+    tcp_options {
+      min = 7946
+      max = 7946
+    }
+    description = "Allow Docker Swarm TCP gossip within VCN"
+  }
+
+  ingress_security_rules {
+    protocol = "17" # UDP
+    source   = oci_core_vcn.dokploy_vcn.cidr_block
+    udp_options {
+      min = 7946
+      max = 7946
+    }
+    description = "Allow Docker Swarm UDP gossip within VCN"
+  }
+
+  ingress_security_rules {
+    protocol = "17" # UDP
+    source   = oci_core_vcn.dokploy_vcn.cidr_block
+    udp_options {
+      min = 4789
+      max = 4789
+    }
+    description = "Allow Docker Swarm overlay network within VCN"
   }
 
   # ICMP traffic

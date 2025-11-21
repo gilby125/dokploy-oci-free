@@ -52,3 +52,59 @@ variable "admin_ip_whitelist" {
   type        = list(string)
   default     = ["0.0.0.0/0"] # Open to all by default - CHANGE THIS for production
 }
+
+variable "dokploy_domain" {
+  description = "Fully qualified domain name that Traefik should use for the Dokploy dashboard."
+  type        = string
+}
+
+variable "dokploy_additional_domains" {
+  description = "Additional hostnames that should route to the Dokploy dashboard (for example, apex domains)."
+  type        = list(string)
+  default     = []
+}
+
+variable "cloudflare_api_token" {
+  description = "API token with DNS edit permissions for the Cloudflare zone."
+  type        = string
+  sensitive   = true
+}
+
+variable "cloudflare_zone_id" {
+  description = "DEPRECATED: Use cloudflare_zones instead. Cloudflare zone ID that contains the Dokploy hostnames."
+  type        = string
+  default     = ""
+}
+
+variable "cloudflare_proxied" {
+  description = "Whether Cloudflare should proxy the managed A records (set true to enable the orange cloud)."
+  type        = bool
+  default     = false
+}
+
+variable "backup_retention_days" {
+  description = "Number of days to retain object storage backups before automatic deletion."
+  type        = number
+  default     = 7
+}
+
+variable "enable_automated_backups" {
+  description = "Enable automated daily backups of Docker/Dokploy data to object storage."
+  type        = bool
+  default     = true
+}
+
+variable "recovery_boot_volume_id" {
+  description = "OPTIONAL: Boot volume OCID to restore from. Leave empty for normal operation. Set this to a preserved boot volume OCID to recover from a disaster. Example: 'ocid1.bootvolume.oc1.region.abc123...'"
+  type        = string
+  default     = ""
+}
+
+variable "managed_dns_records" {
+  description = "Map of DNS records to manage in Cloudflare. Each record specifies domain and subdomain. Use '@' for apex domain. All records will point to the main instance IP."
+  type = map(object({
+    domain    = string  # e.g. "throughfire.net" or "rateduty.com"
+    subdomain = string  # e.g. "www" or "@" for apex
+  }))
+  default = {}
+}

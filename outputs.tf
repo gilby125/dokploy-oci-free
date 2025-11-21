@@ -19,6 +19,6 @@ output "worker_instance_ids" {
 }
 
 output "dokploy_dashboard_url" {
-  description = "URL to access the Dokploy dashboard"
-  value       = "http://${oci_core_public_ip.dokploy_main_reserved_ip.ip_address}:3000"
+  description = "HTTPS URL for accessing Dokploy via Traefik"
+  value       = "https://${oci_core_public_ip.dokploy_main_reserved_ip.ip_address}"
 }

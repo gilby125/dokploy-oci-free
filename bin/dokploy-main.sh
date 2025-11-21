@@ -22,6 +22,9 @@ readonly DOCKER_INSTALL_SCRIPT="/tmp/docker-install-$$.sh"
 readonly DOKPLOY_INSTALL_SCRIPT="/tmp/dokploy-install-$$.sh"
 readonly MAX_RETRIES=3
 readonly RETRY_DELAY=5
+readonly METADATA_BASE_URL="http://169.254.169.254/opc/v2/instance/metadata"
+readonly METADATA_AUTH_HEADER="Authorization: Bearer Oracle"
+readonly TRAEFIK_DYNAMIC_DIR="/etc/dokploy/traefik/dynamic"
 
 # Known good checksums (update these when upgrading)
 # To get current checksums: curl -sSL https://get.docker.com | sha256sum
@@ -70,6 +73,12 @@ download_with_retry() {
     return 1
 }
 
+# Fetch instance metadata from OCI metadata service
+fetch_metadata() {
+    local key="$1"
+    curl -s -f -H "$METADATA_AUTH_HEADER" "${METADATA_BASE_URL}/${key}" || true
+}
+
 # Function to check network connectivity
 check_connectivity() {
     echo "Checking network connectivity..."
@@ -84,6 +93,48 @@ check_connectivity() {
     echo "✓ Network connectivity verified"
     return 0
 }
+
+# Load domain and access control list from instance metadata
+DOKPLOY_DOMAINS_RAW="$(fetch_metadata "dokploy_domains")"
+ADMIN_ACCESS_CIDRS="$(fetch_metadata "admin_access_cidrs")"
+
+if [[ -z "${DOKPLOY_DOMAINS_RAW:-}" ]]; then
+    echo "ERROR: dokploy_domains metadata value is required"
+    exit 1
+fi
+
+IFS=',' read -r -a DOKPLOY_DOMAINS <<< "${DOKPLOY_DOMAINS_RAW}"
+
+# Trim whitespace and discard empty entries
+TEMP_DOMAINS=()
+for domain in "${DOKPLOY_DOMAINS[@]}"; do
+    trimmed="$(echo "$domain" | xargs)"
+    if [[ -n "$trimmed" ]]; then
+        TEMP_DOMAINS+=("$trimmed")
+    fi
+done
+DOKPLOY_DOMAINS=("${TEMP_DOMAINS[@]}")
+
+if [[ ${#DOKPLOY_DOMAINS[@]} -eq 0 ]]; then
+    echo "ERROR: No valid domains provided in dokploy_domains metadata value"
+    exit 1
+fi
+
+PRIMARY_DOKPLOY_DOMAIN="${DOKPLOY_DOMAINS[0]}"
+DOKPLOY_DOMAIN="$PRIMARY_DOKPLOY_DOMAIN"
+
+IFS=',' read -r -a ACCESS_CIDRS_ARRAY <<< "${ADMIN_ACCESS_CIDRS:-}"
+ACCESS_CIDRS=()
+for cidr in "${ACCESS_CIDRS_ARRAY[@]}"; do
+    cidr_trimmed="$(echo "$cidr" | xargs)"
+    if [[ -n "$cidr_trimmed" ]]; then
+        ACCESS_CIDRS+=("$cidr_trimmed")
+    fi
+done
+
+if [[ ${#ACCESS_CIDRS[@]} -eq 0 ]]; then
+    echo "WARNING: No admin access CIDRs provided; Traefik whitelist will be empty"
+fi
 
 # Wait for cloud-init's apt-daily services to complete using systemd
 echo "Waiting for apt-daily services to complete..."
@@ -234,6 +285,16 @@ fi
 
 echo "Docker version: $(docker --version)"
 
+# Configure firewall rules so Swarm workers can join this manager
+iptables -I INPUT 1 -p tcp --dport 2377 -j ACCEPT
+iptables -I INPUT 1 -p tcp --dport 7946 -j ACCEPT
+iptables -I INPUT 1 -p udp --dport 7946 -j ACCEPT
+iptables -I INPUT 1 -p udp --dport 4789 -j ACCEPT
+
+if command -v netfilter-persistent >/dev/null 2>&1; then
+    netfilter-persistent save || echo "WARNING: Failed to persist iptables rules"
+fi
+
 # Download Dokploy installation script
 echo "Downloading Dokploy installation script..."
 if ! download_with_retry "$DOKPLOY_INSTALL_URL" "$DOKPLOY_INSTALL_SCRIPT"; then
@@ -265,28 +326,6 @@ fi
 # Clean up
 rm -f "$DOKPLOY_INSTALL_SCRIPT"
 
-# Configure firewall rules for Docker Swarm
-# Note: Using iptables directly since OCI instances use iptables by default
-# ufw may not be installed or enabled
-
-iptables -I INPUT 1 -p tcp --dport 22 -j ACCEPT
-iptables -I INPUT 1 -p tcp --dport 80 -j ACCEPT
-iptables -I INPUT 1 -p tcp --dport 443 -j ACCEPT
-iptables -I INPUT 1 -p tcp --dport 3000 -j ACCEPT
-iptables -I INPUT 1 -p tcp --dport 996 -j ACCEPT
-iptables -I INPUT 1 -p tcp --dport 2377 -j ACCEPT
-iptables -I INPUT 1 -p udp --dport 7946 -j ACCEPT
-iptables -I INPUT 1 -p tcp --dport 7946 -j ACCEPT
-iptables -I INPUT 1 -p udp --dport 4789 -j ACCEPT
-
-# Reorder FORWARD chain rules:
-# Remove the default REJECT rule (ignore error if not found)
-iptables -D FORWARD -j REJECT --reject-with icmp-host-prohibited || true
-# Append the REJECT rule at the end so that Docker rules can be matched first
-iptables -A FORWARD -j REJECT --reject-with icmp-host-prohibited
-
-netfilter-persistent save
-
 # Final validation
 echo "=== Configuration Validation ==="
 
@@ -304,12 +343,6 @@ else
     exit 1
 fi
 
-if iptables -L INPUT -n | grep -q "2377"; then
-    echo "✓ Docker Swarm firewall rules are configured"
-else
-    echo "✗ Docker Swarm firewall rules may be missing"
-fi
-
 # Wait for Dokploy to be ready
 echo "Waiting for Dokploy to start..."
 for i in {1..60}; do
@@ -320,6 +353,186 @@ for i in {1..60}; do
     echo "Attempt $i: Waiting for Dokploy..."
     sleep 5
 done
+
+# Ensure a stable overlay network exists for app-to-app DNS
+echo "Ensuring overlay network 'dokploy-network' exists..."
+if ! docker network ls --format '{{.Name}}' | grep -qx 'dokploy-network'; then
+    if docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -qi 'active'; then
+        docker network create --driver overlay --attachable dokploy-network || echo "WARNING: Failed to create overlay network 'dokploy-network'"
+    else
+        # Fallback for non-swarm (should not happen on manager, but safe-guard)
+        docker network create --driver bridge dokploy-network || echo "WARNING: Failed to create bridge network 'dokploy-network'"
+    fi
+else
+    echo "✓ Overlay network 'dokploy-network' already present"
+fi
+
+# Configure Traefik routing for HTTPS access to Dokploy
+echo "Configuring Traefik for domains: ${DOKPLOY_DOMAINS[*]}..."
+mkdir -p "$TRAEFIK_DYNAMIC_DIR"
+
+tmp_middlewares="$(mktemp)"
+if [[ ${#ACCESS_CIDRS[@]} -eq 0 ]]; then
+    cat <<'EOF' > "$tmp_middlewares"
+http:
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    admin-ip-whitelist:
+      ipWhiteList:
+        sourceRange: []
+EOF
+else
+    cat <<'EOF' > "$tmp_middlewares"
+http:
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+        permanent: true
+    admin-ip-whitelist:
+      ipWhiteList:
+        sourceRange:
+EOF
+    for cidr in "${ACCESS_CIDRS[@]}"; do
+        printf '          - %s\n' "$cidr" >> "$tmp_middlewares"
+    done
+fi
+mv "$tmp_middlewares" "${TRAEFIK_DYNAMIC_DIR}/middlewares.yml"
+
+HOST_RULE=""
+for domain in "${DOKPLOY_DOMAINS[@]}"; do
+    if [[ -n "$HOST_RULE" ]]; then
+        HOST_RULE+=" || "
+    fi
+    HOST_RULE+="Host(\`${domain}\`)"
+done
+
+tmp_dokploy="$(mktemp)"
+cat <<EOF > "$tmp_dokploy"
+http:
+  routers:
+    dokploy-http:
+      rule: ${HOST_RULE}
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+      service: dokploy-service-app
+    dokploy-https:
+      rule: ${HOST_RULE}
+      entryPoints:
+        - websecure
+      middlewares:
+        - admin-ip-whitelist
+      tls:
+        certResolver: letsencrypt
+      service: dokploy-service-app
+  services:
+    dokploy-service-app:
+      loadBalancer:
+        servers:
+          - url: http://dokploy:3000
+        passHostHeader: true
+EOF
+
+mv "$tmp_dokploy" "${TRAEFIK_DYNAMIC_DIR}/dokploy.yml"
+
+chmod 640 "${TRAEFIK_DYNAMIC_DIR}/middlewares.yml" "${TRAEFIK_DYNAMIC_DIR}/dokploy.yml"
+
+if docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -qi 'manager'; then
+    if docker service ls --filter name=dokploy-traefik --format '{{.Name}}' | grep -q '^dokploy-traefik$'; then
+        echo "Reloading Traefik service via docker swarm..."
+        docker service update --force dokploy-traefik || echo "WARNING: Failed to force update Traefik service"
+    fi
+else
+    traefik_container_id=$(docker ps --filter name=dokploy-traefik --format '{{.ID}}' | head -n1 || true)
+    if [[ -n "${traefik_container_id:-}" ]]; then
+        echo "Restarting Traefik container..."
+        docker restart "$traefik_container_id" || echo "WARNING: Failed to restart Traefik container"
+    fi
+fi
+
+# Configure automated backups to OCI Object Storage
+ENABLE_BACKUP="$(fetch_metadata "enable_automated_backup")"
+BACKUP_BUCKET="$(fetch_metadata "backup_bucket")"
+BACKUP_NAMESPACE="$(fetch_metadata "backup_namespace")"
+BACKUP_SCRIPT_B64="$(fetch_metadata "backup_script")"
+
+if [[ "${ENABLE_BACKUP}" == "true" ]] && [[ -n "${BACKUP_BUCKET}" ]] && [[ -n "${BACKUP_NAMESPACE}" ]]; then
+    echo "=== Configuring automated backups ==="
+
+    # Install OCI CLI if not present
+    if ! command -v oci &> /dev/null; then
+        echo "Installing OCI CLI..."
+        bash -c "$(curl -L https://raw.githubusercontent.com/oracle/oci-cli/master/scripts/install/install.sh)" -- \
+            --accept-all-defaults \
+            --install-dir /opt/oci-cli \
+            --exec-dir /usr/local/bin
+    fi
+
+    # Create backup script from metadata
+    if [[ -n "${BACKUP_SCRIPT_B64}" ]]; then
+        echo "Installing backup script..."
+        echo "${BACKUP_SCRIPT_B64}" | base64 -d > /usr/local/bin/dokploy-backup.sh
+        chmod +x /usr/local/bin/dokploy-backup.sh
+
+        # Substitute environment variables in script
+        cat > /etc/environment.d/dokploy-backup.conf << EOF
+BACKUP_BUCKET=${BACKUP_BUCKET}
+OCI_NAMESPACE=${BACKUP_NAMESPACE}
+EOF
+
+        # Create systemd service
+        cat > /etc/systemd/system/dokploy-backup.service << 'EOF'
+[Unit]
+Description=Dokploy Backup to OCI Object Storage
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/environment.d/dokploy-backup.conf
+ExecStart=/usr/local/bin/dokploy-backup.sh
+StandardOutput=journal
+StandardError=journal
+EOF
+
+        # Create systemd timer (runs daily at 2 AM UTC)
+        cat > /etc/systemd/system/dokploy-backup.timer << 'EOF'
+[Unit]
+Description=Daily Dokploy Backup Timer
+Requires=dokploy-backup.service
+
+[Timer]
+OnCalendar=daily
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
+EOF
+
+        # Reload systemd and enable timer
+        systemctl daemon-reload
+        systemctl enable dokploy-backup.timer
+        systemctl start dokploy-backup.timer
+
+        echo "✓ Automated backup configured (runs daily at 2 AM UTC)"
+        echo "  Bucket: ${BACKUP_BUCKET}"
+        echo "  Namespace: ${BACKUP_NAMESPACE}"
+        echo "  Manual backup: sudo /usr/local/bin/dokploy-backup.sh"
+        echo "  View timer status: systemctl status dokploy-backup.timer"
+        echo "  View backup logs: journalctl -u dokploy-backup.service"
+    else
+        echo "WARNING: Backup script metadata not available"
+    fi
+else
+    echo "Automated backups disabled or not configured"
+fi
 
 echo "=== Dokploy main configuration completed successfully at $(date) ==="
 
