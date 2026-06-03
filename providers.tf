@@ -15,7 +15,14 @@ terraform {
   }
 }
 
-provider "oci" {}
+provider "oci" {
+  # Defaults to API-key auth from ~/.oci/config (unchanged behavior). Set
+  # oci_auth = "SecurityToken" (+ run `oci session authenticate`) to use a
+  # browser/session token instead.
+  auth                = var.oci_auth
+  config_file_profile = var.oci_config_profile
+  region              = var.oci_region
+}
 
 provider "cloudflare" {
   api_token = var.cloudflare_api_token

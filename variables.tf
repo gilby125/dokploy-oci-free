@@ -64,6 +64,24 @@ variable "agentplane_subdomain" {
   default     = "agentplane"
 }
 
+variable "oci_auth" {
+  description = "OCI provider auth method. 'ApiKey' (default) reads ~/.oci/config API key; set 'SecurityToken' to use a session token from `oci session authenticate`."
+  type        = string
+  default     = "ApiKey"
+}
+
+variable "oci_config_profile" {
+  description = "OCI config profile name in ~/.oci/config."
+  type        = string
+  default     = "DEFAULT"
+}
+
+variable "oci_region" {
+  description = "OCI region. Required when oci_auth = SecurityToken."
+  type        = string
+  default     = "us-chicago-1"
+}
+
 variable "komodo_image_tag" {
   description = "Komodo Periphery image tag (ghcr.io/moghtech/komodo-periphery). Match the Core version."
   type        = string
@@ -89,8 +107,9 @@ variable "admin_ip_whitelist" {
 }
 
 variable "dokploy_domain" {
-  description = "Fully qualified domain name that Traefik should use for the Dokploy dashboard."
+  description = "LEGACY (Dokploy is gone): no longer referenced by any resource. Kept declared so existing tfvars that set it don't error; defaulted so it isn't required."
   type        = string
+  default     = ""
 }
 
 variable "dokploy_additional_domains" {
