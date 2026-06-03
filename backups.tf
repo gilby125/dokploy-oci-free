@@ -3,9 +3,10 @@
 
 # Get the boot volume ID for the main instance
 data "oci_core_boot_volume_attachments" "dokploy_main_boot_attachment" {
+  count               = var.deploy ? 1 : 0
   availability_domain = var.availability_domain_main
   compartment_id      = var.compartment_id
-  instance_id         = oci_core_instance.dokploy_main.id
+  instance_id         = oci_core_instance.dokploy_main[0].id
 }
 
 # Boot volume backup policy - daily backups with 5-day retention
@@ -31,7 +32,8 @@ resource "oci_core_volume_backup_policy" "dokploy_main_backup_policy" {
 
 # Attach backup policy to main instance boot volume
 resource "oci_core_volume_backup_policy_assignment" "dokploy_main_boot_backup_assignment" {
-  asset_id  = data.oci_core_boot_volume_attachments.dokploy_main_boot_attachment.boot_volume_attachments[0].boot_volume_id
+  count     = var.deploy ? 1 : 0
+  asset_id  = data.oci_core_boot_volume_attachments.dokploy_main_boot_attachment[0].boot_volume_attachments[0].boot_volume_id
   policy_id = oci_core_volume_backup_policy.dokploy_main_backup_policy.id
 }
 

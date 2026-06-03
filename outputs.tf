@@ -5,7 +5,7 @@ output "main_instance_public_ip" {
 
 output "main_instance_id" {
   description = "OCID of the main Dokploy instance"
-  value       = oci_core_instance.dokploy_main.id
+  value       = one(oci_core_instance.dokploy_main[*].id)
 }
 
 output "worker_instance_public_ips" {
