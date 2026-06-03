@@ -52,6 +52,18 @@ variable "komodo_core_public_key" {
   type        = string
 }
 
+variable "doppelops_zone" {
+  description = "Cloudflare zone for the app fleet. doppelops.com apex = fleet; apps live on <app>.doppelops.com subdomains."
+  type        = string
+  default     = "doppelops.com"
+}
+
+variable "agentplane_subdomain" {
+  description = "Subdomain under doppelops_zone for the agentplane public resolver (points at the NLB, CF-proxied)."
+  type        = string
+  default     = "agentplane"
+}
+
 variable "komodo_image_tag" {
   description = "Komodo Periphery image tag (ghcr.io/moghtech/komodo-periphery). Match the Core version."
   type        = string
