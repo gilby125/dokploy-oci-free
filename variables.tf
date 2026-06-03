@@ -47,6 +47,17 @@ variable "boot_volume_size_in_gbs" {
   default     = 50 # OCI Free: 200 GB total / 4 nodes
 }
 
+variable "komodo_core_public_key" {
+  description = "Public key of the Komodo Core that manages these nodes (the PERIPHERY_CORE_PUBLIC_KEY value from the Core host, e.g. /opt/komodo/compose.env). Each node's Periphery trusts requests signed by this key (passkey-less auth). Set in terraform.tfvars; not committed."
+  type        = string
+}
+
+variable "komodo_image_tag" {
+  description = "Komodo Periphery image tag (ghcr.io/moghtech/komodo-periphery). Match the Core version."
+  type        = string
+  default     = "2"
+}
+
 variable "deploy" {
   description = "Master on/off switch. true = create/maintain the compute + NLB layer. Set to false and `terraform apply` to TEAR DOWN the servers and load balancer instead of redeploying over the top. The VCN/subnet/gateways, the reserved IP 170.9.237.30 (kept, just unassigned), and the backup bucket are preserved either way, so a later `deploy = true` reattaches the same IP."
   type        = bool

@@ -83,6 +83,22 @@ resource "oci_core_security_list" "dokploy_security_list" {
     }
   }
 
+  # Komodo Periphery: the local Komodo Core reaches each node's agent on :8120.
+  # Scoped to the admin whitelist (which includes the IP Terraform is run from,
+  # i.e. the Core's egress) so the agent is not exposed to the internet.
+  dynamic "ingress_security_rules" {
+    for_each = concat([local.current_ip_cidr], var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])
+    content {
+      protocol = "6" # TCP
+      source   = ingress_security_rules.value
+      tcp_options {
+        min = 8120
+        max = 8120
+      }
+      description = "Allow Komodo Periphery from whitelisted IP: ${ingress_security_rules.value}"
+    }
+  }
+
   # DNS-over-TLS (AdGuard Home)
   ingress_security_rules {
     protocol = "6" # TCP
