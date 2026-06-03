@@ -39,3 +39,24 @@ resource "cloudflare_record" "agentplane" {
   proxied         = true
   allow_overwrite = true
 }
+
+# --- stable per-node hostnames for Komodo registration -----------------------
+# Register Komodo servers by these names (https://oci-<node>.doppelops.com:8120)
+# instead of raw IPs. Terraform keeps each A record pointed at the node's current
+# IP, so recreating an instance (which changes a worker's ephemeral IP) updates
+# DNS automatically and Komodo needs no change. DNS-only (NOT proxied): the Core
+# connects straight to :8120, which Cloudflare's proxy would not pass.
+resource "cloudflare_record" "oci_node" {
+  for_each = var.deploy ? merge(
+    { "oci-main" = oci_core_public_ip.dokploy_main_reserved_ip.ip_address },
+    { for i, w in oci_core_instance.dokploy_worker : "oci-w${i + 1}" => w.public_ip },
+  ) : {}
+
+  zone_id         = data.cloudflare_zone.doppelops[0].id
+  name            = each.key
+  type            = "A"
+  content         = each.value
+  ttl             = 1     # Auto
+  proxied         = false # DNS-only; Core reaches :8120 directly
+  allow_overwrite = true
+}
