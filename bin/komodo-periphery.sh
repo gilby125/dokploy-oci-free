@@ -69,12 +69,13 @@ fetch_metadata() {
 
 check_connectivity() {
     echo "Checking network connectivity..."
-    for url in "https://get.docker.com" "https://ghcr.io"; do
-        if ! curl -sf --head --connect-timeout 5 "$url" >/dev/null; then
-            echo "ERROR: Cannot reach $url"
-            return 1
-        fi
-    done
+    # Only gate on the Docker install host (returns 200 to HEAD). ghcr.io (image
+    # registry) does not answer HEAD on its root cleanly; the actual image pull
+    # via `docker compose` surfaces any registry reachability problem itself.
+    if ! curl -sf --head --connect-timeout 5 "https://get.docker.com" >/dev/null; then
+        echo "ERROR: Cannot reach https://get.docker.com"
+        return 1
+    fi
     echo "✓ Network connectivity verified"
 }
 
