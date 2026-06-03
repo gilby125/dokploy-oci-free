@@ -41,6 +41,18 @@ variable "memory_in_gbs" {
   default     = "6" # OCI Free
 }
 
+variable "boot_volume_size_in_gbs" {
+  description = "Boot volume size per instance. 50 is the OCI minimum; 4 nodes x 50 GB = 200 GB = the full Always-Free block-storage allotment. Do not raise without reducing node count."
+  type        = number
+  default     = 50 # OCI Free: 200 GB total / 4 nodes
+}
+
+variable "deploy" {
+  description = "Master on/off switch. true = create/maintain the compute + NLB layer. Set to false and `terraform apply` to TEAR DOWN the servers and load balancer instead of redeploying over the top. The VCN/subnet/gateways, the reserved IP 170.9.237.30 (kept, just unassigned), and the backup bucket are preserved either way, so a later `deploy = true` reattaches the same IP."
+  type        = bool
+  default     = true
+}
+
 variable "ocpus" {
   description = "OCPUs for instance shape config. 1 OCPU is the maximum for free tier with 3 working nodes."
   type        = string
@@ -103,8 +115,8 @@ variable "recovery_boot_volume_id" {
 variable "managed_dns_records" {
   description = "Map of DNS records to manage in Cloudflare. Each record specifies domain and subdomain. Use '@' for apex domain. All records will point to the main instance IP."
   type = map(object({
-    domain    = string  # e.g. "throughfire.net" or "rateduty.com"
-    subdomain = string  # e.g. "www" or "@" for apex
+    domain    = string # e.g. "throughfire.net" or "rateduty.com"
+    subdomain = string # e.g. "www" or "@" for apex
   }))
   default = {}
 }

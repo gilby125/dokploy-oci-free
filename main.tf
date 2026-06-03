@@ -1,5 +1,7 @@
 # Main instance
 resource "oci_core_instance" "dokploy_main" {
+  count = var.deploy ? 1 : 0
+
   display_name         = "dokploy-main-${random_string.resource_code.result}"
   compartment_id       = var.compartment_id
   availability_domain  = var.availability_domain_main
@@ -100,11 +102,13 @@ resource "oci_core_instance" "dokploy_main" {
 
 # Worker instances (similar to main instance)
 resource "oci_core_instance" "dokploy_worker" {
-  count = var.num_worker_instances
+  count = var.deploy ? var.num_worker_instances : 0
 
-  display_name        = "dokploy-worker-${count.index + 1}-${random_string.resource_code.result}"
-  compartment_id      = var.compartment_id
-  availability_domain = var.availability_domain_workers
+  display_name   = "dokploy-worker-${count.index + 1}-${random_string.resource_code.result}"
+  compartment_id = var.compartment_id
+  # Spread workers across the region's ADs for a modicum of redundancy (see
+  # ads.tf). AD is immutable, so changing placement recreates the instance.
+  availability_domain = local.worker_ad[count.index]
 
   is_pv_encryption_in_transit_enabled = local.instance_config.is_pv_encryption_in_transit_enabled
   shape                               = local.instance_config.shape
@@ -138,6 +142,9 @@ resource "oci_core_instance" "dokploy_worker" {
   source_details {
     source_id   = local.instance_config.source_details.source_id
     source_type = local.instance_config.source_details.source_type
+    # Free-tier block storage is 200 GB total; 50 GB is the OCI minimum boot
+    # volume. 4 nodes x 50 GB = 200 GB = exactly the Always-Free allotment.
+    boot_volume_size_in_gbs = var.boot_volume_size_in_gbs
   }
 
   agent_config {
