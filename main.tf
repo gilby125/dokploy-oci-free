@@ -12,9 +12,9 @@ resource "oci_core_instance" "dokploy_main" {
 
   metadata = {
     ssh_authorized_keys     = local.instance_config.ssh_authorized_keys
-    user_data               = base64encode(file("./bin/dokploy-main.sh"))
-    dokploy_domain          = var.dokploy_domain
-    dokploy_domains         = join(",", distinct(concat([var.dokploy_domain], var.dokploy_additional_domains)))
+    user_data               = base64encode(file("./bin/komodo-periphery.sh"))
+    komodo_core_public_key  = var.komodo_core_public_key
+    komodo_image_tag        = var.komodo_image_tag
     admin_access_cidrs      = join(",", distinct(concat([local.current_ip_cidr], var.admin_ip_whitelist, [oci_core_vcn.dokploy_vcn.cidr_block])))
     backup_bucket           = oci_objectstorage_bucket.dokploy_backups.name
     backup_namespace        = data.oci_objectstorage_namespace.current.namespace
@@ -114,8 +114,10 @@ resource "oci_core_instance" "dokploy_worker" {
   shape                               = local.instance_config.shape
 
   metadata = {
-    ssh_authorized_keys = local.instance_config.ssh_authorized_keys
-    user_data           = base64encode(file("./bin/dokploy-worker.sh"))
+    ssh_authorized_keys    = local.instance_config.ssh_authorized_keys
+    user_data              = base64encode(file("./bin/komodo-periphery.sh"))
+    komodo_core_public_key = var.komodo_core_public_key
+    komodo_image_tag       = var.komodo_image_tag
   }
 
   create_vnic_details {
