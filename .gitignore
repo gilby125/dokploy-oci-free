@@ -14,7 +14,3 @@
 # Terraform variables with secrets
 terraform.tfvars
 *.auto.tfvarsshared-services/redis/users.acl
-
-# Postgres shared-service secrets (only the .example templates are tracked)
-shared-services/postgres/db.env
-shared-services/postgres/pgbackrest.conf
