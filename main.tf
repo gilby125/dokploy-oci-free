@@ -102,13 +102,13 @@ resource "oci_core_instance" "dokploy_main" {
 
 # Worker instances (similar to main instance)
 resource "oci_core_instance" "dokploy_worker" {
-  count = var.deploy ? var.num_worker_instances : 0
+  for_each = var.deploy ? toset(var.worker_node_ids) : toset([])
 
-  display_name   = "dokploy-worker-${count.index + 1}-${random_string.resource_code.result}"
+  display_name   = "dokploy-worker-${each.key}-${random_string.resource_code.result}"
   compartment_id = var.compartment_id
   # Spread workers across the region's ADs for a modicum of redundancy (see
   # ads.tf). AD is immutable, so changing placement recreates the instance.
-  availability_domain = local.worker_ad[count.index]
+  availability_domain = local.worker_ad[each.key]
 
   is_pv_encryption_in_transit_enabled = local.instance_config.is_pv_encryption_in_transit_enabled
   shape                               = local.instance_config.shape
@@ -121,7 +121,7 @@ resource "oci_core_instance" "dokploy_worker" {
   }
 
   create_vnic_details {
-    display_name              = "dokploy-worker-${count.index + 1}-${random_string.resource_code.result}"
+    display_name              = "dokploy-worker-${each.key}-${random_string.resource_code.result}"
     subnet_id                 = oci_core_subnet.dokploy_subnet.id
     assign_ipv6ip             = false
     assign_private_dns_record = true
@@ -137,8 +137,11 @@ resource "oci_core_instance" "dokploy_worker" {
   }
 
   shape_config {
-    memory_in_gbs = local.instance_config.shape_config.memory_in_gbs
-    ocpus         = local.instance_config.shape_config.ocpus
+    # The DB worker (var.db_worker_id) gets a larger shape; other workers use
+    # the default. Changing shape_config is an in-place UpdateInstance (reboot),
+    # not a replacement — the boot volume (and its Postgres data) is preserved.
+    memory_in_gbs = each.key == var.db_worker_id ? var.db_memory_in_gbs : local.instance_config.shape_config.memory_in_gbs
+    ocpus         = each.key == var.db_worker_id ? var.db_ocpus : local.instance_config.shape_config.ocpus
   }
 
   source_details {
