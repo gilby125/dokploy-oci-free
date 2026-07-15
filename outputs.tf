@@ -10,12 +10,12 @@ output "main_instance_id" {
 
 output "worker_instance_public_ips" {
   description = "Public IPs of the worker instances"
-  value       = oci_core_instance.dokploy_worker[*].public_ip
+  value       = { for k, w in oci_core_instance.dokploy_worker : k => w.public_ip }
 }
 
 output "worker_instance_ids" {
   description = "OCIDs of the worker instances"
-  value       = oci_core_instance.dokploy_worker[*].id
+  value       = { for k, w in oci_core_instance.dokploy_worker : k => w.id }
 }
 
 output "dokploy_dashboard_url" {

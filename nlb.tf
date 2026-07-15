@@ -9,9 +9,9 @@
 # Being L4, it cannot terminate TLS; the per-node proxy does (CF SSL = Full-strict).
 
 variable "num_web_backends" {
-  description = "How many OCI nodes serve the public agentplane web tier behind the NLB. Start at 2 for one-node fault tolerance; raise to spread across all 3 ADs."
+  description = "How many OCI nodes serve the public agentplane web tier behind the NLB. Free tier is now 2 nodes (main = web, worker-3 = Postgres only), so only main serves the web tier -> 1. The pool is taken from all_node_private_ips with main first, so a value of 1 means just main; do NOT raise to 2 unless a worker actually runs the Caddy/web tier (worker-3 does not)."
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "web_backend_port" {
@@ -26,7 +26,7 @@ locals {
   # OCI node has a special control role here.)
   all_node_private_ips = var.deploy ? concat(
     [oci_core_instance.dokploy_main[0].private_ip],
-    oci_core_instance.dokploy_worker[*].private_ip,
+    [for w in oci_core_instance.dokploy_worker : w.private_ip],
   ) : []
   web_backend_ips = slice(
     local.all_node_private_ips,

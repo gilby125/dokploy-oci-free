@@ -49,7 +49,7 @@ resource "cloudflare_record" "agentplane" {
 resource "cloudflare_record" "oci_node" {
   for_each = var.deploy ? merge(
     { "oci-main" = oci_core_public_ip.dokploy_main_reserved_ip.ip_address },
-    { for i, w in oci_core_instance.dokploy_worker : "oci-w${i + 1}" => w.public_ip },
+    { for k, w in oci_core_instance.dokploy_worker : "oci-w${k}" => w.public_ip },
   ) : {}
 
   zone_id         = data.cloudflare_zone.doppelops[0].id
