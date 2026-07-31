@@ -13,4 +13,5 @@
 
 # Terraform variables with secrets
 terraform.tfvars
-*.auto.tfvarsshared-services/redis/users.acl
+*.auto.tfvars
+shared-services/redis/users.acl

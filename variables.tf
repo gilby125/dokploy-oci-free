@@ -14,9 +14,15 @@ variable "source_image_id" {
 }
 
 variable "num_worker_instances" {
-  description = "Number of Dokploy worker instances to deploy (max 3 for free tier)."
+  description = "LEGACY (superseded by worker_node_ids): no longer referenced. Kept declared so existing tfvars that set it don't error."
   type        = number
   default     = 1
+}
+
+variable "worker_node_ids" {
+  description = "Stable IDs for the worker nodes. Each becomes display name dokploy-worker-<id>, DNS oci-w<id>, and is AD-placed by ads.tf via local.worker_ad[<id>]. PAYG accounts are exempt from the Always-Free ARM cut, so the full 4 OCPU / 24 GB / 200 GB A1 allotment is in use: 1 main + 3 workers ['1','2','3'], each at 1 OCPU / 6 GB / 50 GB. Worker '3' hosts the self-hosted agentplane Postgres (10.0.0.244)."
+  type        = list(string)
+  default     = ["1", "2", "3"]
 }
 
 variable "availability_domain_main" {
@@ -39,6 +45,28 @@ variable "memory_in_gbs" {
   description = "Memory in GBs for instance shape config. 6 GB is the maximum for free tier with 3 working nodes."
   type        = string
   default     = "6" # OCI Free
+}
+
+# Per-node override for the DB worker (worker-3): the shared Postgres serves the
+# whole fleet and is CPU/RAM-bound on 1 OCPU, so it gets a bigger slice while a
+# web worker is dropped (num_web_backends 3->2). The tenancy total stays within
+# the PAYG Always-Free A1 pool (4 OCPU / 24 GB): main 1/6 + w1 1/6 + w3 2/12.
+variable "db_worker_id" {
+  description = "worker_node_ids entry that hosts the shared Postgres and gets the larger shape. Empty = all workers use the default shape."
+  type        = string
+  default     = "3"
+}
+
+variable "db_ocpus" {
+  description = "OCPUs for the DB worker. Keep tenancy total <= 4 OCPU (PAYG A1 free pool)."
+  type        = string
+  default     = "2"
+}
+
+variable "db_memory_in_gbs" {
+  description = "Memory (GB) for the DB worker. Keep tenancy total <= 24 GB (PAYG A1 free pool)."
+  type        = string
+  default     = "12"
 }
 
 variable "boot_volume_size_in_gbs" {
